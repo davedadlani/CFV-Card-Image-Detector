@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local card-API response cache (npm run cards)
+.cache/
+
+# Tesseract downloads/caches created at runtime
+*.traineddata
+*.traineddata.gz.tmp
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log

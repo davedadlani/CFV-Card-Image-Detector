@@ -1,0 +1,40 @@
+{
+  "name": "cfv-card-image-detector",
+  "version": "1.0.0",
+  "description": "Scan a card with your camera and have it be uploaded to a builder that can be connected to your Deck Log",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "cards": "node scripts/build-cards.mjs",
+    "ocr-assets": "node scripts/fetch-ocr-assets.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davedadlani/CFV-Card-Image-Detector.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/davedadlani/CFV-Card-Image-Detector/issues"
+  },
+  "homepage": "https://github.com/davedadlani/CFV-Card-Image-Detector#readme",
+  "dependencies": {
+    "fuse.js": "^7.5.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
