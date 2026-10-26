@@ -370,7 +370,7 @@ export interface TextLine {
  * or dim photos still produce candidates. Runs that are very tall are dropped:
  * they are texture (playmat, wood grain), not a single line of print.
  */
-export function findTextLines(source: HTMLCanvasElement, from = 0.35): TextLine[] {
+export function findTextLines(source: ImageSource, from = 0.35): TextLine[] {
   const work = fitCanvas(source, 1200);
   const width = work.width;
   const height = work.height;

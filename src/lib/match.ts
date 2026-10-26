@@ -126,9 +126,23 @@ export function extractNumberCandidates(text: string): string[] {
     for (let index = 0; index < tokens.length - 1; index++) {
       const prefix = tokens[index];
       const serial = tokens[index + 1];
-      if (!SET_PREFIX.test(prefix)) continue;
-      if (!SERIAL_TAIL.test(serial) || !/\d/.test(serial)) continue;
-      addToken(`${prefix}${serial}`);
+      if (SET_PREFIX.test(prefix) && SERIAL_TAIL.test(serial) && /\d/.test(serial)) {
+        addToken(`${prefix}${serial}`);
+      }
+
+      // OCR can also break the serial itself: "02-811 1/SR24" is
+      // "DZ-BT11/SR24" with the set prefix misread as digits. Join a
+      // digit-heavy prefix to a slash-bearing tail as a second candidate.
+      const prefixDigits = prefix.match(DIGITS)?.length ?? 0;
+      const serialDigits = serial.match(DIGITS)?.length ?? 0;
+      if (
+        prefix.length >= 4 &&
+        prefixDigits >= 2 &&
+        serialDigits >= 2 &&
+        /[/\\|Il!]/.test(serial)
+      ) {
+        addToken(`${prefix}${serial}`);
+      }
     }
   }
 

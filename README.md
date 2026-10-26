@@ -5,9 +5,10 @@ against the official **Standard (regulation D)** card list, and add it to a
 deck builder. Everything runs locally in the browser: images and OCR text never
 leave the device.
 
-- **Scan page** (`#scan`) — live camera or image upload, with a draggable crop
-  box. The scanner first checks that a card is actually in the frame, then
-  reads the collector number and card name, and shows the closest matches.
+- **Scan page** (`#scan`) — live camera or image upload, with a crop box that is
+  placed on the card automatically when it can be found, and stays draggable.
+  The scanner first checks that a card is actually in the frame, then reads the
+  collector number and card name, and shows the closest matches.
 - **Cards page** (`#cards`) — search and filter the full Standard card list.
 - **Deck page** (`#deck`) — build, validate, and export a deck.
 
@@ -82,6 +83,16 @@ OCR uses [Tesseract.js](https://github.com/naptha/tesseract.js) with the
 
 ## How a scan works
 
+Uploads first get a **frame-placement** pass (`src/lib/cardBounds.ts`). Edge
+energy is profiled row by row and column by column; the densest card-shaped
+block is taken as the card outline, snapped to the card aspect ratio, and its
+bottom edge is anchored just below the lowest printed line (the
+collector-number row). That keeps the number inside the crop even when the card
+sits in the middle of a table or floor. Photos where the card already fills the
+frame keep the default crop, and **Auto-align** re-runs detection after a
+manual change. If no card outline is found, the default frame is used and the
+row-by-row sweep below still has a chance to read the number.
+
 1. **Presence gate** (`src/lib/presence.ts`) — measures print-like edge energy
    in the card-name and collector-number bands plus overall detail, contrast,
    and saturation. A blank wall, desk, or dark frame is rejected immediately
@@ -151,6 +162,7 @@ src/
   lib/
     scan.ts       presence gate → band OCR → matching orchestration
     match.ts      number/name extraction, canonicalisation, scoring
+    cardBounds.ts finds the card and places the upload crop frame
     presence.ts   cheap “is a card in frame?” pixel analysis
     ocr.ts        cached Tesseract worker(s)
     image.ts      crop, grayscale, binarize, fingerprint helpers
@@ -172,5 +184,8 @@ scripts/
 - Glare, motion blur, sleeves, and severe perspective distortion reduce
   accuracy. Fill the guide, keep the printed number sharp, and take a second
   photo if the first read is wrong.
+- Auto-align assumes an upright card. A strongly tilted or landscape card may
+  need the frame dragged manually; the whole-photo sweep still reads the number
+  when the crop is imperfect.
 - The camera requires HTTPS (or localhost). Upload always remains available.
 - Card data and images belong to Bushiroad; this is an unofficial fan tool.

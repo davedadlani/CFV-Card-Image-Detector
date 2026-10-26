@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { findCardCrop } from "../lib/cardBounds";
 import { adjustCrop, cropCanvas, defaultCrop, fitCanvas, type CropHandle, type Rect } from "../lib/image";
 
 interface UploadCropperProps {
   src: string;
   busy: boolean;
   onScan: (canvas: HTMLCanvasElement, fallbackSource: HTMLCanvasElement) => void;
+}
+
+/** Detection can fail on unusual photos; that must never block the upload. */
+function autoCrop(image: HTMLImageElement): Rect | null {
+  try {
+    return findCardCrop(image);
+  } catch {
+    return null;
+  }
 }
 
 export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
@@ -14,6 +24,8 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
   const [natural, setNatural] = useState({ width: 0, height: 0 });
   /** "fit" scales the photo down to the panel; "actual" shows native pixels. */
   const [zoom, setZoom] = useState<"fit" | "actual">("fit");
+  /** True while the frame is where auto-align put it, not where the user did. */
+  const [autoAligned, setAutoAligned] = useState(false);
   const [drag, setDrag] = useState<{
     mode: CropHandle;
     startX: number;
@@ -25,6 +37,7 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
     setCrop(null);
     setDrag(null);
     setZoom("fit");
+    setAutoAligned(false);
   }, [src]);
 
   useEffect(() => {
@@ -56,18 +69,33 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
     if (!img) return;
     const size = { width: img.naturalWidth, height: img.naturalHeight };
     setNatural(size);
-    setCrop(defaultCrop(size.width, size.height));
+    const auto = autoCrop(img);
+    setCrop(auto ?? defaultCrop(size.width, size.height));
+    setAutoAligned(Boolean(auto));
+  };
+
+  /** Places the frame on the card outline; falls back to the default frame. */
+  const align = () => {
+    const img = imgRef.current;
+    if (!img || !natural.width) return;
+    const auto = autoCrop(img);
+    setCrop(auto ?? defaultCrop(natural.width, natural.height));
+    setAutoAligned(Boolean(auto));
   };
 
   const begin = (mode: CropHandle) => (event: ReactPointerEvent) => {
     if (!crop) return;
     event.preventDefault();
     event.stopPropagation();
+    setAutoAligned(false);
     setDrag({ mode, startX: event.clientX, startY: event.clientY, crop });
   };
 
   const reset = () => {
-    if (natural.width) setCrop(defaultCrop(natural.width, natural.height));
+    if (natural.width) {
+      setCrop(defaultCrop(natural.width, natural.height));
+      setAutoAligned(false);
+    }
   };
 
   const toggleZoom = () => setZoom((value) => (value === "fit" ? "actual" : "fit"));
@@ -90,9 +118,9 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
       },
       outWidth,
     );
-    // Also keep the whole photo: when the crop leaves background below the
-    // card, the printed number sits above the crop's bottom edge and the
-    // scanner falls back to these wider bands.
+    // Also keep the whole photo: if auto-align missed or the frame is
+    // imperfect, the row-by-row sweep can still read the number from the
+    // original pixels.
     const full = fitCanvas(img, 2000);
     onScan(canvas, full);
   };
@@ -137,7 +165,9 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
 
       <div className="crop-controls">
         <p className="muted">
-          Align the frame with the card. Drag inside it to move, or pull a corner to resize.
+          {autoAligned
+            ? "The frame was placed on the card automatically. Drag inside it to move, or pull a corner to resize."
+            : "Align the frame with the card. Drag inside it to move, or pull a corner to resize."}
           {zoom === "actual"
             ? " Scroll the preview to inspect the photo at full resolution."
             : natural.width
@@ -145,6 +175,9 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
               : ""}
         </p>
         <div className="crop-controls__buttons">
+          <button type="button" className="btn btn--ghost" onClick={align} disabled={!crop || busy}>
+            Auto-align
+          </button>
           <button type="button" className="btn btn--ghost" onClick={reset} disabled={!crop || busy}>
             Reset frame
           </button>

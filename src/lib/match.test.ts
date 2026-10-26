@@ -124,6 +124,11 @@ describe("extractNumberCandidates", () => {
     expect(extractNumberCandidates("OZ-TBPO2 OO1 GS 202")).toContain("OZTBPO2OO1");
   });
 
+  it("re-joins a set prefix misread as digits to a split serial", () => {
+    // Real read from a phone photo of DZ-BT11/SR24.
+    expect(extractNumberCandidates("PB 02-811 1/SR24 ED 2025")).toContain("028111SR24");
+  });
+
   it("drops letters glued onto the end of the number", () => {
     expect(extractNumberCandidates("DZ-BT01/001ES")).toContain("DZBT01001");
   });
@@ -192,6 +197,17 @@ describe("matchScan", () => {
     const result = matchScan(ambiguousDb, { numberText: "OZ-TBPO2 OO1 GS 202" });
     expect(result.matches[0]?.card.number).toBe("DZ-TBP02/001");
     expect(result.matches.map((match) => match.card.number)).not.toContain("DZ-TB02/001");
+  });
+
+  it("matches a number split inside the serial", () => {
+    const splitDb = makeDatabase([
+      makeCard({ id: 201, number: "DZ-BT11/SR24", name: "救護の翼 ソエル" }),
+      makeCard({ id: 202, number: "DZ-BT01/SR24", name: "優麗の騎士 ノーヴィア" }),
+    ]);
+
+    const result = matchScan(splitDb, { numberText: "PB 02-811 1/SR24 ED 2025" });
+    expect(result.matches[0]?.card.number).toBe("DZ-BT11/SR24");
+    expect(result.matches.map((match) => match.card.number)).not.toContain("DZ-BT01/SR24");
   });
 
   it("prefers the full printing over a shorter lookalike", () => {
