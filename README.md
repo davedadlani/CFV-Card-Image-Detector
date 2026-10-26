@@ -86,11 +86,16 @@ OCR uses [Tesseract.js](https://github.com/naptha/tesseract.js) with the
    in the card-name and collector-number bands plus overall detail, contrast,
    and saturation. A blank wall, desk, or dark frame is rejected immediately
    with **“No card detected”** / **“Frame too dark”**, before OCR runs.
-2. **Collector number first** (`src/lib/scan.ts`) — the bottom print line is
-   cropped at the source resolution (never the downscaled preview) and OCR'd at
-   1800–2200 px wide, using several overlapping vertical bands. OCR output is
-   highly sensitive to band placement and output width, so uploads try multiple
-   bands and widths and merge the readings.
+2. **Collector number** (`src/lib/scan.ts`) — uploads are read from the whole
+   photo first: the bottom edge of the printed area is detected, and the number
+   line just above it is OCR'd at 1500–1800 px wide, so a photo that keeps
+   table, floor, or playmat below the card still lands on the print. A reading
+   is trusted only when two independent strips agree or one is an exact print; a
+   lone fuzzy read of a small, blurry number is discarded rather than guessed.
+   If that finds nothing, the hand-drawn crop's bottom bands are tried at
+   1800–2200 px wide with several overlapping vertical bands, and the readings
+   are merged. OCR output is highly sensitive to band placement and output
+   width, so uploads try multiple bands and widths.
 3. **Name fallback** — the name bar is only OCR'd when the number did not
    produce a confident match. On 350 px official images the name is ~50 px tall
    and unreliable, so it is treated as supporting evidence, not a guess.

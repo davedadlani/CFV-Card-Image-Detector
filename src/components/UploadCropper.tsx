@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { adjustCrop, cropCanvas, defaultCrop, type CropHandle, type Rect } from "../lib/image";
+import { adjustCrop, cropCanvas, defaultCrop, fitCanvas, type CropHandle, type Rect } from "../lib/image";
 
 interface UploadCropperProps {
   src: string;
   busy: boolean;
-  onScan: (canvas: HTMLCanvasElement) => void;
+  onScan: (canvas: HTMLCanvasElement, fallbackSource: HTMLCanvasElement) => void;
 }
 
 export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
@@ -85,7 +85,11 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
       },
       outWidth,
     );
-    onScan(canvas);
+    // Also keep the whole photo: when the crop leaves background below the
+    // card, the printed number sits above the crop's bottom edge and the
+    // scanner falls back to these wider bands.
+    const full = fitCanvas(img, 2000);
+    onScan(canvas, full);
   };
 
   return (

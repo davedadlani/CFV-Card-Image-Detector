@@ -176,7 +176,7 @@ export function ScanPage({ db }: ScanPageProps) {
   }, []);
 
   const runScan = useCallback(
-    async (canvas: HTMLCanvasElement, thorough: boolean) => {
+    async (canvas: HTMLCanvasElement, thorough: boolean, fallbackSource?: HTMLCanvasElement) => {
       if (scanningRef.current) return;
       scanningRef.current = true;
       setScanning(true);
@@ -189,6 +189,7 @@ export function ScanPage({ db }: ScanPageProps) {
         setCapture(dataUrl);
         const result = await scanCanvas(db, canvas, {
           thorough,
+          fallbackSource,
           onProgress: (message, value) => setProgress({ message, value }),
         });
         setOutcome(result);
@@ -475,7 +476,7 @@ export function ScanPage({ db }: ScanPageProps) {
                   <UploadCropper
                     src={uploadUrl}
                     busy={scanning}
-                    onScan={(canvas) => void runScan(canvas, true)}
+                    onScan={(canvas, full) => void runScan(canvas, true, full)}
                   />
                   <div className="stage-controls">
                     <label className="btn btn--ghost file-button">

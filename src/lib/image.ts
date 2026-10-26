@@ -347,3 +347,52 @@ export function defaultCrop(imageWidth: number, imageHeight: number): Rect {
     height,
   };
 }
+
+/**
+ * Finds the bottom edge of the printed area in a photo, as a fraction of the
+ * image height.
+ *
+ * Uploads commonly keep some table, floor, or playmat below the card, which
+ * pushes the printed collector number above the bottom edge of the crop. The
+ * number shares its baseline with the copyright line just above the card's
+ * bottom border, so anchoring to that border makes the number band land in the
+ * right place regardless of how much background the photo kept.
+ *
+ * Returns null when the lower part of the image has no clear edge (a blank or
+ * uniform photo), so callers can fall back to fixed bands.
+ */
+export function contentBottom(source: HTMLCanvasElement, from = 0.35): number | null {
+  const work = fitCanvas(source, 240);
+  const width = work.width;
+  const height = work.height;
+  if (height < 24) return null;
+  const data = get2d(work).getImageData(0, 0, width, height).data;
+  const rows = new Float32Array(height);
+  let peak = 0;
+
+  for (let y = 1; y < height; y++) {
+    let sum = 0;
+    for (let x = 0; x < width - 1; x++) {
+      const i = (y * width + x) * 4;
+      const j = i + 4;
+      const a = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const b = data[j] * 0.299 + data[j + 1] * 0.587 + data[j + 2] * 0.114;
+      sum += Math.abs(a - b);
+    }
+    rows[y] = sum / Math.max(1, width - 1);
+    if (rows[y] > peak) peak = rows[y];
+  }
+
+  if (peak < 4) return null;
+  const threshold = Math.max(3, peak * 0.16);
+  const start = Math.floor(height * from);
+
+  // Walk up from the bottom and accept the first row that has printed detail
+  // both on itself and on the row above: a single noisy row is not an edge.
+  for (let y = height - 2; y > start; y--) {
+    if (rows[y] >= threshold && rows[y - 1] >= threshold) {
+      return (y + 1) / height;
+    }
+  }
+  return null;
+}
