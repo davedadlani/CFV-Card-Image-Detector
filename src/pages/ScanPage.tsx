@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+} from "react";
 import type { Card, CardDatabase, ScanMatch, ScanOutcome } from "../types";
 import { useDecks } from "../context/DeckContext";
 import { stripParallelName } from "../lib/database";
@@ -125,6 +131,8 @@ export function ScanPage({ db }: ScanPageProps) {
   const [lastAdded, setLastAdded] = useState<Card | null>(null);
 
   const [uploadUrl, setUploadUrl] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [selected, setSelected] = useState<Card | null>(null);
 
   const stopCamera = useCallback(() => {
@@ -323,6 +331,56 @@ export function ScanPage({ db }: ScanPageProps) {
     setUploadUrl(URL.createObjectURL(file));
   };
 
+  // Dropping a photo is supported whether or not one is already loaded, so the
+  // preview can be replaced without going through the file picker first.
+  const clearDrag = useCallback(() => {
+    dragDepth.current = 0;
+    setDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+    // A drop outside the panel or a cancelled drag never reaches the panel's
+    // own handlers, so clear the highlight from the window instead.
+    window.addEventListener("drop", clearDrag);
+    window.addEventListener("dragend", clearDrag);
+    return () => {
+      window.removeEventListener("drop", clearDrag);
+      window.removeEventListener("dragend", clearDrag);
+    };
+  }, [dragging, clearDrag]);
+
+  const dragHasFiles = (event: ReactDragEvent) =>
+    Array.from(event.dataTransfer?.types ?? []).includes("Files");
+
+  const handleDragEnter = (event: ReactDragEvent) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+
+  const handleDragOver = (event: ReactDragEvent) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!dragging) setDragging(true);
+  };
+
+  const handleDragLeave = (event: ReactDragEvent) => {
+    if (!dragHasFiles(event)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  };
+
+  const handleDrop = (event: ReactDragEvent) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    clearDrag();
+    if (scanningRef.current) return;
+    chooseFile(event.dataTransfer.files?.[0] ?? null);
+  };
+
   const statusText =
     camera === "starting"
       ? "Starting camera…"
@@ -470,61 +528,68 @@ export function ScanPage({ db }: ScanPageProps) {
               </p>
             </>
           ) : (
-            <>
-              {uploadUrl ? (
-                <>
+            <div
+              className={`upload-dropzone${dragging ? " upload-dropzone--dragging" : ""}`}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <div className="upload-dropzone__stage">
+                {uploadUrl ? (
                   <UploadCropper
                     src={uploadUrl}
                     busy={scanning}
                     onScan={(canvas, full) => void runScan(canvas, true, full)}
                   />
-                  <div className="stage-controls">
-                    <label className="btn btn--ghost file-button">
-                      Choose another
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
-                      />
-                    </label>
-                  </div>
-                </>
-              ) : (
-                <label
-                  className="upload-drop"
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    chooseFile(event.dataTransfer.files?.[0] ?? null);
-                  }}
-                >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
-                  />
-                  <span className="upload-drop__icon" aria-hidden="true">
-                    ＋
+                ) : (
+                  <label className="upload-drop">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+                    />
+                    <span className="upload-drop__icon" aria-hidden="true">
+                      ＋
+                    </span>
+                    <strong>Choose a card photo</strong>
+                    <small>
+                      or drop a JPEG / PNG here. You can adjust the crop before scanning. On a
+                      phone, a photo taken in good light works better than a live camera frame.
+                    </small>
+                  </label>
+                )}
+                {dragging && (
+                  <span className="drop-hint" aria-hidden="true">
+                    Drop to {uploadUrl ? "replace the photo" : "open the photo"}
                   </span>
-                  <strong>Choose a card photo</strong>
-                  <small>
-                    or drop a JPEG / PNG here. You can adjust the crop before scanning. On a phone,
-                    a photo taken in good light works better than a live camera frame.
-                  </small>
-                </label>
+                )}
+              </div>
+
+              {uploadUrl && (
+                <div className="stage-controls">
+                  <label className="btn btn--ghost file-button">
+                    Choose another
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
               )}
+
               {scanError && (
                 <div className="callout callout--error" role="alert">
                   <p>{scanError}</p>
                 </div>
               )}
-              {!uploadUrl && (
-                <p className="muted small scan-hint">
-                  Tip: flatten the card, fill the frame, avoid glare, and keep the bottom number
-                  band sharp. The scan never leaves your device.
-                </p>
-              )}
-            </>
+              <p className="muted small scan-hint">
+                {uploadUrl
+                  ? "Drag another photo onto the preview to replace it."
+                  : "Tip: flatten the card, fill the frame, avoid glare, and keep the bottom number band sharp. The scan never leaves your device."}
+              </p>
+            </div>
           )}
         </section>
 

@@ -1,6 +1,15 @@
 ﻿import * as Tesseract from "tesseract.js";
 import type { CardDatabase, ScanOutcome } from "../types";
-import { binarize, contentBottom, cropFraction, fitCanvas, grayscale, pad, type Rect } from "./image";
+import {
+  binarize,
+  cropFraction,
+  findTextLines,
+  fitCanvas,
+  grayscale,
+  pad,
+  type Rect,
+  type TextLine,
+} from "./image";
 import { matchScan, type MatchResult } from "./match";
 import { recognize } from "./ocr";
 import { detectCardPresence } from "./presence";
@@ -22,8 +31,6 @@ const NUMBER_BANDS: Rect[] = [
   { x: 0, y: 0.966, width: 1, height: 0.022 },
   { x: 0, y: 0.97, width: 1, height: 0.024 },
 ];
-/** Used when the photo has no detectable printed area to anchor to. */
-const FALLBACK_BOTTOM = 0.94;
 const NAME_BANDS: Rect[] = [
   { x: 0.03, y: 0.82, width: 0.94, height: 0.112 },
   { x: 0.04, y: 0.836, width: 0.92, height: 0.088 },
@@ -31,42 +38,24 @@ const NAME_BANDS: Rect[] = [
 
 const NUMBER_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/- ";
 
-/** One whole-photo attempt: the strip, and how to prepare it. */
-interface WideBand {
-  rect: Rect;
-  binary: boolean;
-  width: number;
-}
-
 /**
- * Candidate strips for the collector-number line, derived from the bottom edge
- * of the printed area. The number shares its baseline with the copyright line
- * just above the card's bottom border, so the strips are centred that far up
- * from the detected edge. Narrow strips cut out noisy background beside the
- * card; full-width strips keep the whole printed line together.
+ * A tight box around one detected line of print, grown vertically so the glyphs
+ * are never clipped. The detected run is only the dense middle of the line, so
+ * a straight crop of it would lose ascenders and descenders.
  */
-function wideNumberBands(bottom: number): WideBand[] {
-  const strip = (
-    offset: number,
-    x: number,
-    width: number,
-    height: number,
-    outWidth: number,
-  ): WideBand => ({
-    rect: { x, y: Math.max(0, bottom - offset - height / 2), width, height },
-    binary: true,
-    width: outWidth,
-  });
-
-  return [
-    strip(0.05, 0.03, 0.35, 0.022, 1500),
-    strip(0.05, 0, 1, 0.032, 1800),
-    strip(0.058, 0.02, 0.5, 0.026, 1600),
-    strip(0.058, 0, 1, 0.032, 1800),
-    strip(0.042, 0.02, 0.5, 0.026, 1600),
-    strip(0.062, 0.03, 0.35, 0.022, 1500),
-    strip(0.038, 0, 1, 0.032, 1800),
-  ];
+function lineBand(line: TextLine, x: number, width: number): Rect {
+  const raw = line.bottom - line.top;
+  const height = Math.min(0.05, Math.max(raw * 2.2, 0.016));
+  // A run taller than the cap merged several rows (or a bordered text box).
+  // The collector number is always the bottom row, so read from the bottom up.
+  const centre =
+    raw * 2.2 > 0.05 ? line.bottom - height / 2 : (line.top + line.bottom) / 2;
+  return {
+    x,
+    y: Math.max(0, Math.min(1 - height, centre - height / 2)),
+    width,
+    height,
+  };
 }
 
 /** Never OCR a copy wider than this; more pixels only cost time. */
@@ -80,9 +69,9 @@ export interface ScanOptions {
   /** Extra passes for uploads or an explicit "scan now" action. */
   thorough?: boolean;
   /**
-   * The whole photo a crop came from. Uploads can leave background below the
-   * card, which lifts the printed number above the crop's bottom edge; a
-   * thorough scan falls back to this image when the crop reads nothing.
+   * The whole photo a crop came from. Uploads can leave the card anywhere in
+   * the frame, so a thorough scan scans this photo line by line before falling
+   * back to bands placed on the crop itself.
    */
   fallbackSource?: HTMLCanvasElement;
   onProgress?: ScanProgress;
@@ -146,19 +135,49 @@ async function readBand(
   return { text: normalize(pass.text), confidence: pass.confidence };
 }
 
+/** Never OCR more lines than this; the number is usually in the bottom few. */
+const MAX_CANDIDATE_LINES = 8;
+
+/**
+ * Two ways of cropping a detected line. The number is printed at the left of
+ * the card, so the narrow strip avoids the copyright text on the right; a
+ * full-width strip sometimes segments better on high-resolution photos, so
+ * both are tried before moving up to the next line.
+ */
+interface LineStrip {
+  x: number;
+  width: number;
+  outWidth: number;
+  binary: boolean;
+}
+
+const LINE_STRIPS: LineStrip[] = [
+  { x: 0.02, width: 0.5, outWidth: 1500, binary: true },
+  { x: 0, width: 1, outWidth: 2200, binary: true },
+];
+
+/** A fuzzy whole-photo reading, kept so a second pass can corroborate it. */
+interface LineRead {
+  line: TextLine;
+  strip: LineStrip;
+  result: MatchResult;
+  confidence: number;
+}
+
 /**
  * Reads the collector number straight from the original photo, before the crop
  * bands run.
  *
- * The number sits a few percent above the bottom border of the card, and a
- * hand-drawn upload crop usually keeps that border near the bottom of the
- * photo even when it also keeps some table below it. Running this first also
- * matters for accuracy: Tesseract gets unreliable after a long run of misses,
- * and the strips it cannot read mid-scan read cleanly on a fresh engine.
+ * Uploads put the card wherever the user left it: sometimes flush with the
+ * bottom of the crop, sometimes with a table, floor, or playmat below it. Rather
+ * than assuming a fixed distance from the bottom edge, this walks the photo's
+ * detected lines of print from the bottom up and reads each one. Running this
+ * first also matters for accuracy: Tesseract gets unreliable after a long run of
+ * misses, and a strip it cannot read mid-scan reads cleanly on a fresh engine.
  *
- * Each strip is matched on its own, and a reading is only trusted when two
- * independent strips agree or one is an exact print. A single fuzzy read of a
- * small, blurry number is easy to confuse with a neighbouring card.
+ * A reading is only trusted when it is an exact print, or when a second pass
+ * over the same line agrees on the card. A single fuzzy read of a small, blurry
+ * number is easy to confuse with a neighbouring card.
  */
 async function readWholePhotoNumber(
   db: CardDatabase,
@@ -167,42 +186,68 @@ async function readWholePhotoNumber(
 ): Promise<{ result: MatchResult; text: string }> {
   const source =
     photo.width > MAX_WORK_WIDTH ? fitCanvas(photo, MAX_WORK_WIDTH) : photo;
-  const bottom = contentBottom(source) ?? FALLBACK_BOTTOM;
-  const bands = wideNumberBands(bottom);
-  const votes = new Map<string, { result: MatchResult; count: number; exact: boolean }>();
+  const lines = findTextLines(source).slice(0, MAX_CANDIDATE_LINES);
   const reads: string[] = [];
+  const total = lines.length * LINE_STRIPS.length;
+  let step = 0;
+  let fuzzy: LineRead | null = null;
 
-  for (let index = 0; index < bands.length; index++) {
-    const { rect, binary, width } = bands[index];
-    const from = 2 + (index / bands.length) * 8;
-    const to = 2 + ((index + 1) / bands.length) * 8;
-    report("Reading the card number…", from);
-    const read = await readBand(source, rect, width, {
-      psm: Tesseract.PSM.SINGLE_LINE,
-      whitelist: NUMBER_WHITELIST,
-      binary,
-      padding: [20, 10],
-      report,
-      from,
-      to,
-    });
-    if (!read.text) continue;
-    reads.push(read.text);
+  for (const line of lines) {
+    for (const strip of LINE_STRIPS) {
+      const from = 2 + (step / total) * 7;
+      const to = 2 + ((step + 1) / total) * 7;
+      step++;
+      report("Scanning the photo for the card number…", from);
+      const read = await readBand(source, lineBand(line, strip.x, strip.width), strip.outWidth, {
+        psm: Tesseract.PSM.SINGLE_LINE,
+        whitelist: NUMBER_WHITELIST,
+        binary: strip.binary,
+        padding: [20, 10],
+        report,
+        from,
+        to,
+      });
+      if (!read.text) continue;
+      reads.push(read.text);
 
-    const matched = matchScan(db, { numberText: read.text });
-    const best = matched.matches[0];
-    if (!best) continue;
+      const matched = matchScan(db, { numberText: read.text });
+      const best = matched.matches[0];
+      if (!best) continue;
 
-    const exact = best.confidence >= STRONG_CONFIDENCE;
-    let vote = votes.get(best.card.numberKey);
-    if (!vote) {
-      vote = { result: matched, count: 0, exact: false };
-      votes.set(best.card.numberKey, vote);
+      // An exact or canonical print needs no second opinion.
+      if (best.confidence >= STRONG_CONFIDENCE) {
+        return { result: matched, text: reads.join("\n") };
+      }
+      if (!fuzzy || best.confidence > fuzzy.confidence) {
+        fuzzy = { line, strip, result: matched, confidence: best.confidence };
+      }
     }
-    vote.count += 1;
-    vote.exact = vote.exact || exact;
-    if (vote.exact || vote.count >= 2) {
-      return { result: vote.result, text: reads.join("\n") };
+  }
+
+  if (fuzzy) {
+    // Re-read the same line with the other crop and a grayscale copy: only an
+    // agreeing second pass is trusted.
+    report("Double-checking the card number…", 9);
+    const alt = LINE_STRIPS[fuzzy.strip === LINE_STRIPS[0] ? 1 : 0];
+    const read = await readBand(
+      source,
+      lineBand(fuzzy.line, alt.x, alt.width),
+      Math.min(MAX_WORK_WIDTH, Math.round(alt.outWidth * 1.1)),
+      {
+        psm: Tesseract.PSM.SINGLE_LINE,
+        whitelist: NUMBER_WHITELIST,
+        padding: [20, 10],
+        report,
+        from: 9,
+        to: 10,
+      },
+    );
+    if (read.text) {
+      reads.push(read.text);
+      const best = matchScan(db, { numberText: read.text }).matches[0];
+      if (best && best.card.numberKey === fuzzy.result.matches[0].card.numberKey) {
+        return { result: fuzzy.result, text: reads.join("\n") };
+      }
     }
   }
 
@@ -253,17 +298,21 @@ export async function scanCanvas(
   const numberBands = thorough ? NUMBER_BANDS : [NUMBER_BANDS[1]];
 
   const numberTexts: string[] = [];
-  let wideText = "";
+  let photoText = "";
   let deepScan = thorough;
 
-  // Uploads often keep background below the card, which pushes the printed
-  // number away from the bottom edge of the crop. Read the number from the
-  // whole photo first, while the engine is fresh.
+  // Uploads put the card wherever the crop left it, so phone photos get a
+  // whole-photo line sweep first — while the engine is fresh. Small uploads are
+  // usually card-only images (official renders, tight screenshots) where the
+  // crop's own bands are exact, so try those first and only sweep if they miss.
+  const smallUpload = Boolean(fallbackSource && fallbackSource.width < 1000);
+  const sweepFirst = thorough && Boolean(fallbackSource) && !smallUpload;
+
   let result: MatchResult = { matches: [], readNumber: null, readName: null };
-  if (thorough && fallbackSource) {
+  if (sweepFirst && fallbackSource) {
     const wide = await readWholePhotoNumber(db, fallbackSource, report);
     result = wide.result;
-    wideText = wide.text;
+    photoText = wide.text;
   }
 
   if (result.matches.length === 0) {
@@ -306,9 +355,17 @@ export async function scanCanvas(
     }
   }
 
+  // A small upload whose crop bands did not read cleanly still gets the
+  // photo-wide sweep, in case the card is not flush with the crop's bottom.
+  if (!sweepFirst && thorough && fallbackSource && !hasStrongNumber(result)) {
+    const wide = await readWholePhotoNumber(db, fallbackSource, report);
+    if (wide.result.matches.length > 0) result = wide.result;
+    photoText = wide.text;
+  }
+
   const cropNumberText = numberTexts.join("\n");
-  /** Both passes, for the scan-details panel; matching only uses crop reads. */
-  const numberText = [wideText, cropNumberText].filter(Boolean).join("\n");
+  /** Both passes, for the scan-details panel. */
+  const numberText = [photoText, cropNumberText].filter(Boolean).join("\n");
   let nameText = "";
 
   // The number is the reliable identifier. Only fall back to the name bar when

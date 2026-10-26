@@ -349,50 +349,85 @@ export function defaultCrop(imageWidth: number, imageHeight: number): Rect {
 }
 
 /**
- * Finds the bottom edge of the printed area in a photo, as a fraction of the
- * image height.
- *
- * Uploads commonly keep some table, floor, or playmat below the card, which
- * pushes the printed collector number above the bottom edge of the crop. The
- * number shares its baseline with the copyright line just above the card's
- * bottom border, so anchoring to that border makes the number band land in the
- * right place regardless of how much background the photo kept.
- *
- * Returns null when the lower part of the image has no clear edge (a blank or
- * uniform photo), so callers can fall back to fixed bands.
+ * A horizontal band of print in a photo, as fractions of the image height.
  */
-export function contentBottom(source: HTMLCanvasElement, from = 0.35): number | null {
-  const work = fitCanvas(source, 240);
+export interface TextLine {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Finds printed text lines in a photo, bottom-most first.
+ *
+ * Uploads put the card wherever the user left it: cropped tight, or with a
+ * table, floor, or playmat below it. Any fixed set of bands assumes the print
+ * sits at a known fraction of the photo, which breaks as soon as the crop keeps
+ * background. Profiling horizontal edge energy row by row finds the lines that
+ * are actually printed, so the caller can read the collector number wherever
+ * the card happens to sit.
+ *
+ * The threshold is relative to the photo's own strongest rows, so low-contrast
+ * or dim photos still produce candidates. Runs that are very tall are dropped:
+ * they are texture (playmat, wood grain), not a single line of print.
+ */
+export function findTextLines(source: HTMLCanvasElement, from = 0.35): TextLine[] {
+  const work = fitCanvas(source, 1200);
   const width = work.width;
   const height = work.height;
-  if (height < 24) return null;
-  const data = get2d(work).getImageData(0, 0, width, height).data;
-  const rows = new Float32Array(height);
-  let peak = 0;
+  if (height < 40) return [];
 
-  for (let y = 1; y < height; y++) {
+  const data = get2d(work).getImageData(0, 0, width, height).data;
+  const x0 = Math.floor(width * 0.02);
+  const x1 = Math.floor(width * 0.55);
+  const step = Math.max(1, Math.round(width / 900));
+  const samples = Math.max(1, Math.ceil((x1 - x0 - 2 * step) / step));
+  const rows = new Float32Array(height);
+
+  for (let y = 1; y < height - 1; y++) {
     let sum = 0;
-    for (let x = 0; x < width - 1; x++) {
+    for (let x = x0; x < x1 - 2 * step; x += step) {
       const i = (y * width + x) * 4;
-      const j = i + 4;
+      const j = (y * width + x + 2 * step) * 4;
       const a = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
       const b = data[j] * 0.299 + data[j + 1] * 0.587 + data[j + 2] * 0.114;
       sum += Math.abs(a - b);
     }
-    rows[y] = sum / Math.max(1, width - 1);
-    if (rows[y] > peak) peak = rows[y];
+    rows[y] = sum / samples;
   }
 
-  if (peak < 4) return null;
-  const threshold = Math.max(3, peak * 0.16);
-  const start = Math.floor(height * from);
+  const start = Math.max(1, Math.floor(height * from));
+  const sorted = Array.from(rows.slice(start, height - 1)).sort((a, b) => a - b);
+  if (!sorted.length) return [];
+  const reference = sorted[Math.floor(sorted.length * 0.9)];
+  if (reference < 2) return [];
 
-  // Walk up from the bottom and accept the first row that has printed detail
-  // both on itself and on the row above: a single noisy row is not an edge.
-  for (let y = height - 2; y > start; y--) {
-    if (rows[y] >= threshold && rows[y - 1] >= threshold) {
-      return (y + 1) / height;
+  const threshold = Math.max(2, reference * 0.6);
+  const minHeight = Math.max(1, Math.round(height * 0.003));
+  const mergeGap = Math.max(1, Math.round(height * 0.006));
+  const maxHeight = Math.round(height * 0.08);
+
+  const runs: Array<[number, number]> = [];
+  let runStart = -1;
+  for (let y = start; y < height - 1; y++) {
+    if (rows[y] >= threshold && runStart < 0) runStart = y;
+    if (rows[y] < threshold && runStart >= 0) {
+      runs.push([runStart, y - 1]);
+      runStart = -1;
     }
   }
-  return null;
+  if (runStart >= 0) runs.push([runStart, height - 2]);
+
+  // A line of print can dip below the threshold for a row or two (a thin
+  // stroke, a gap between glyphs); merge those runs back together.
+  const merged: Array<[number, number]> = [];
+  for (const [a, b] of runs) {
+    const last = merged[merged.length - 1];
+    if (last && a - last[1] <= mergeGap) last[1] = b;
+    else merged.push([a, b]);
+  }
+
+  return merged
+    .filter(([a, b]) => b - a + 1 >= minHeight && b - a + 1 <= maxHeight)
+    .map(([a, b]) => ({ top: a / height, bottom: (b + 1) / height }))
+    .sort((a, b) => b.bottom - a.bottom);
 }

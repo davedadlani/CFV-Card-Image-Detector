@@ -86,16 +86,18 @@ OCR uses [Tesseract.js](https://github.com/naptha/tesseract.js) with the
    in the card-name and collector-number bands plus overall detail, contrast,
    and saturation. A blank wall, desk, or dark frame is rejected immediately
    with **“No card detected”** / **“Frame too dark”**, before OCR runs.
-2. **Collector number** (`src/lib/scan.ts`) — uploads are read from the whole
-   photo first: the bottom edge of the printed area is detected, and the number
-   line just above it is OCR'd at 1500–1800 px wide, so a photo that keeps
-   table, floor, or playmat below the card still lands on the print. A reading
-   is trusted only when two independent strips agree or one is an exact print; a
-   lone fuzzy read of a small, blurry number is discarded rather than guessed.
-   If that finds nothing, the hand-drawn crop's bottom bands are tried at
-   1800–2200 px wide with several overlapping vertical bands, and the readings
-   are merged. OCR output is highly sensitive to band placement and output
-   width, so uploads try multiple bands and widths.
+2. **Collector number** (`src/lib/scan.ts`) — photo uploads are scanned row by
+   row. Horizontal edge energy finds the lines of print in the lower part of the
+   photo, and they are read from the bottom up, so the card can sit anywhere in
+   the frame. Each line is OCR'd twice (a left-of-card strip at 1500 px, then
+   full width at 2200 px). A reading is trusted only when it is an exact print,
+   or when a second pass over the same line agrees; a lone fuzzy read of a
+   small, blurry number is discarded rather than guessed. Small card-only
+   uploads (official renders, tight screenshots) try the crop's own bottom
+   bands first at 1800–2200 px, with several overlapping vertical bands whose
+   readings are merged, and only sweep the whole photo if those miss. OCR
+   output is highly sensitive to band placement and output width, so uploads
+   try multiple bands and widths.
 3. **Name fallback** — the name bar is only OCR'd when the number did not
    produce a confident match. On 350 px official images the name is ~50 px tall
    and unreliable, so it is treated as supporting evidence, not a guess.
@@ -168,7 +170,7 @@ scripts/
   OCR can recover. High-resolution phone photos generally scan better than the
   official thumbnails.
 - Glare, motion blur, sleeves, and severe perspective distortion reduce
-  accuracy. Fill the guide, keep the bottom number band sharp, and take a
-  second photo if the first read is wrong.
+  accuracy. Fill the guide, keep the printed number sharp, and take a second
+  photo if the first read is wrong.
 - The camera requires HTTPS (or localhost). Upload always remains available.
 - Card data and images belong to Bushiroad; this is an unofficial fan tool.

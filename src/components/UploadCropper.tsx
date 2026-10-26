@@ -12,6 +12,8 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [crop, setCrop] = useState<Rect | null>(null);
   const [natural, setNatural] = useState({ width: 0, height: 0 });
+  /** "fit" scales the photo down to the panel; "actual" shows native pixels. */
+  const [zoom, setZoom] = useState<"fit" | "actual">("fit");
   const [drag, setDrag] = useState<{
     mode: CropHandle;
     startX: number;
@@ -22,6 +24,7 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
   useEffect(() => {
     setCrop(null);
     setDrag(null);
+    setZoom("fit");
   }, [src]);
 
   useEffect(() => {
@@ -67,6 +70,8 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
     if (natural.width) setCrop(defaultCrop(natural.width, natural.height));
   };
 
+  const toggleZoom = () => setZoom((value) => (value === "fit" ? "actual" : "fit"));
+
   const scan = () => {
     const img = imgRef.current;
     if (!img || !crop) return;
@@ -94,7 +99,7 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
 
   return (
     <div className="upload-cropper">
-      <div className="crop-stage">
+      <div className={`crop-stage${zoom === "actual" ? " crop-stage--actual" : ""}`}>
         <div className="crop-frame" ref={frameRef}>
           <img
             ref={imgRef}
@@ -133,10 +138,24 @@ export function UploadCropper({ src, busy, onScan }: UploadCropperProps) {
       <div className="crop-controls">
         <p className="muted">
           Align the frame with the card. Drag inside it to move, or pull a corner to resize.
+          {zoom === "actual"
+            ? " Scroll the preview to inspect the photo at full resolution."
+            : natural.width
+              ? ` The preview is scaled down; scanning uses all ${natural.width} × ${natural.height} px of the photo.`
+              : ""}
         </p>
         <div className="crop-controls__buttons">
-          <button type="button" className="btn btn--ghost" onClick={reset} disabled={busy}>
+          <button type="button" className="btn btn--ghost" onClick={reset} disabled={!crop || busy}>
             Reset frame
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={toggleZoom}
+            disabled={!crop || busy}
+            aria-pressed={zoom === "actual"}
+          >
+            {zoom === "actual" ? "Fit to panel" : "Actual size"}
           </button>
           <button type="button" className="btn btn--primary" onClick={scan} disabled={!crop || busy}>
             {busy ? "Scanning…" : "Scan image"}
