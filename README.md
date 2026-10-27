@@ -43,6 +43,37 @@ npm run build
 npm run preview
 ```
 
+## Live site
+
+The public site is deployed from the **`live`** branch to GitHub Pages:
+<https://davedadlani.github.io/CFV-Card-Image-Detector/>
+
+`live` is the deployment line; develop on `main` and merge into `live` when a
+change is ready to publish. Every push to `live` (or a manual **Deploy live
+site** run) tests, builds, and publishes the site:
+
+1. `npm ci`
+2. `npm test`
+3. `npm run build` with `VITE_BASE=/CFV-Card-Image-Detector/`
+4. upload `dist/` and deploy it with GitHub Pages
+
+The workflow lives in `.github/workflows/deploy-live.yml`. It derives the base
+path from the repository name, so the build loads its JS, card database, and
+OCR assets from the project subpath. Set a repository variable named `VITE_BASE`
+(for example `/`) if the site later moves to a custom domain. To build the same
+subpath locally:
+
+```powershell
+$env:VITE_BASE = "/CFV-Card-Image-Detector/"
+npm run build
+npm run preview -- --base /CFV-Card-Image-Detector/
+```
+
+**One-time setup:** open **Settings → Pages → Build and deployment** and set
+**Source** to **GitHub Actions**. The workflow cannot enable Pages with the
+default token, so until this is done the deployment job fails and the URL
+returns 404.
+
 ## Scripts
 
 | Command             | What it does                                                        |
