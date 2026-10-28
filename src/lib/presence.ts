@@ -112,15 +112,16 @@ export function evaluatePresence(metrics: PresenceMetrics): PresenceResult {
     bandEvidence * 0.55 + frameEvidence * 0.27 + colorEvidence * 0.18,
   );
 
-  const tooDark = brightness < 0.05 || (brightness < 0.12 && contrast < 0.035);
+  const tooDark = brightness < 0.03 || (brightness < 0.08 && contrast < 0.02);
   // Both bands should show print. If one band is weak (glare, angle, crop),
   // one strong band plus a detailed frame is still accepted.
-  const bothBands = nameDetail >= 0.012 && numberDetail >= 0.006;
+  const bothBands = nameDetail >= 0.008 && numberDetail >= 0.004;
   const oneStrongBand =
-    (nameDetail >= 0.03 && detail >= 0.035) ||
-    (numberDetail >= 0.022 && detail >= 0.04);
+    (nameDetail >= 0.02 && detail >= 0.025) ||
+    (numberDetail >= 0.015 && detail >= 0.03) ||
+    (detail >= 0.04 && (nameDetail >= 0.01 || numberDetail >= 0.008));
 
-  const present = !tooDark && (bothBands || oneStrongBand);
+  const present = !tooDark && (bothBands || oneStrongBand || detail >= 0.05);
 
   return {
     present,

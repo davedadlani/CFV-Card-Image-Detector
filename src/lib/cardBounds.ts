@@ -231,12 +231,12 @@ export function detectCardBounds(frame: CardFrame): Rect | null {
 
   const minRow = Math.round(height * MIN_RUN_FRACTION);
   const minCol = Math.round(width * MIN_RUN_FRACTION);
-  const pad = Math.max(2, Math.round(Math.min(width, height) * PAD_FRACTION));
+  const pad = Math.max(1, Math.round(Math.min(width, height) * PAD_FRACTION));
 
   // A photo with a clearly separated card has one strong run on each axis.
   // When the card fills the frame the profiles are less bimodal, so retry with
   // a lower threshold before giving up.
-  for (const scale of [1, 0.7, 0.45]) {
+  for (const scale of [1, 0.7, 0.5, 0.35]) {
     const row = significantSpan(runs(rows, scale));
     const col = significantSpan(runs(cols, scale));
     if (!row || !col) continue;
@@ -249,7 +249,7 @@ export function detectCardBounds(frame: CardFrame): Rect | null {
     const boxHeight = (row.end - row.start) / height;
     const aspect = (boxWidth * width) / (boxHeight * height);
     // Allow perspective skew, but reject strips that cannot be a card.
-    if (aspect < 0.45 || aspect > 1.05) continue;
+    if (aspect < 0.4 || aspect > 1.15) continue;
 
     const x = Math.max(0, left - pad / width);
     const y = Math.max(0, top - pad / height);
@@ -330,7 +330,9 @@ export function findCardCrop(source: HTMLImageElement | HTMLCanvasElement): Rect
   // images and tight crops rely on the default frame, whose bottom edge is the
   // true card edge; pulling it up to a detected text line would clip the
   // collector number that sits at the very bottom of the print.
-  if (bounds.width >= 0.9 && bounds.height >= 0.9) return null;
+  // Still allow alignment on live scans if the card is very close to filling
+  // but not perfectly tight - only skip for nearly full frame on uploads.
+  if (bounds.width >= 0.95 && bounds.height >= 0.95) return null;
 
   const lines = findTextLines(source);
   const anchor = bottomTextAnchor(bounds, lines);
