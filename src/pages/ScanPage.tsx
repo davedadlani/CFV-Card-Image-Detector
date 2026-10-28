@@ -284,12 +284,14 @@ export function ScanPage({ db }: ScanPageProps) {
             width: detected.width * vw,
             height: detected.height * vh,
           };
-          // Use detected crop but clamp to be reasonable
+          // Expand crop slightly to ensure bottom text isn't cut off
+          const expandX = detectedRect.width * 0.02;
+          const expandY = detectedRect.height * 0.03;
           crop = {
-            x: Math.max(0, detectedRect.x),
-            y: Math.max(0, detectedRect.y),
-            width: Math.min(vw - detectedRect.x, detectedRect.width),
-            height: Math.min(vh - detectedRect.y, detectedRect.height),
+            x: Math.max(0, detectedRect.x - expandX),
+            y: Math.max(0, detectedRect.y - expandY),
+            width: Math.min(vw - (detectedRect.x - expandX), detectedRect.width + expandX * 2),
+            height: Math.min(vh - (detectedRect.y - expandY), detectedRect.height + expandY * 2.5),
           };
         }
       } catch {
