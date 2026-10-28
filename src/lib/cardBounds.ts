@@ -314,7 +314,7 @@ function bottomTextAnchor(bounds: Rect, lines: Array<{ top: number; bottom: numb
  * the frame, so the default crop is right) or no card outline was found. The
  * caller should keep its default crop and let the user align manually.
  */
-export function findCardCrop(source: HTMLImageElement | HTMLCanvasElement): Rect | null {
+export function findCardCrop(source: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement): Rect | null {
   const work = fitCanvas(source, ANALYSIS_MAX);
   const context = get2d(work);
   const frame: CardFrame = {

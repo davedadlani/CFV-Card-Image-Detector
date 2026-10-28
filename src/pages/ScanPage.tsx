@@ -17,6 +17,7 @@ import {
 import { scanCanvas } from "../lib/scan";
 import { CardModal } from "../components/CardModal";
 import { UploadCropper } from "../components/UploadCropper";
+import { findCardCrop } from "../lib/cardBounds";
 
 type CameraState = "idle" | "starting" | "live" | "error";
 type Source = "camera" | "upload";
@@ -263,7 +264,38 @@ export function ScanPage({ db }: ScanPageProps) {
 
       const videoBox = video.getBoundingClientRect();
       const guideBox = guide.getBoundingClientRect();
-      const crop = coverCropFromDisplay(video, videoBox, guideBox);
+      let crop = coverCropFromDisplay(video, videoBox, guideBox);
+      
+      // Try to auto-detect and adjust crop like uploads do
+      try {
+        const detected = findCardCrop(video);
+        if (detected) {
+          // Convert detected fractional crop to video coordinates
+          const { width: vw, height: vh } = { width: video.videoWidth, height: video.videoHeight };
+          const scale = Math.max(videoBox.width / vw, videoBox.height / vh);
+          const drawnWidth = vw * scale;
+          const drawnHeight = vh * scale;
+          const offsetX = (videoBox.width - drawnWidth) / 2;
+          const offsetY = (videoBox.height - drawnHeight) / 2;
+          
+          const detectedRect = {
+            x: detected.x * vw + offsetX / scale,
+            y: detected.y * vh + offsetY / scale,
+            width: detected.width * vw,
+            height: detected.height * vh,
+          };
+          // Use detected crop but clamp to be reasonable
+          crop = {
+            x: Math.max(0, detectedRect.x),
+            y: Math.max(0, detectedRect.y),
+            width: Math.min(vw - detectedRect.x, detectedRect.width),
+            height: Math.min(vh - detectedRect.y, detectedRect.height),
+          };
+        }
+      } catch {
+        // Fall back to guide crop if detection fails
+      }
+      
       // Keep the camera's native pixels (capped) so the bottom number band is
       // not softened before OCR; scanCanvas upscales the band itself.
       const canvas = cropCanvas(video, crop, Math.min(2000, Math.round(crop.width)));
