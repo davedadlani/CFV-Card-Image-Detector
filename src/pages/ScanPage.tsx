@@ -17,7 +17,6 @@ import {
 import { scanCanvas } from "../lib/scan";
 import { CardModal } from "../components/CardModal";
 import { UploadCropper } from "../components/UploadCropper";
-import { findCardCrop } from "../lib/cardBounds";
 
 type CameraState = "idle" | "starting" | "live" | "error";
 type Source = "camera" | "upload";
@@ -266,37 +265,16 @@ export function ScanPage({ db }: ScanPageProps) {
       const guideBox = guide.getBoundingClientRect();
       let crop = coverCropFromDisplay(video, videoBox, guideBox);
       
-      // Try to auto-detect and adjust crop like uploads do
-      try {
-        const detected = findCardCrop(video);
-        if (detected) {
-          // Convert detected fractional crop to video coordinates
-          const { width: vw, height: vh } = { width: video.videoWidth, height: video.videoHeight };
-          const scale = Math.max(videoBox.width / vw, videoBox.height / vh);
-          const drawnWidth = vw * scale;
-          const drawnHeight = vh * scale;
-          const offsetX = (videoBox.width - drawnWidth) / 2;
-          const offsetY = (videoBox.height - drawnHeight) / 2;
-          
-          const detectedRect = {
-            x: detected.x * vw + offsetX / scale,
-            y: detected.y * vh + offsetY / scale,
-            width: detected.width * vw,
-            height: detected.height * vh,
-          };
-          // Expand crop slightly to ensure bottom text isn't cut off
-          const expandX = detectedRect.width * 0.02;
-          const expandY = detectedRect.height * 0.03;
-          crop = {
-            x: Math.max(0, detectedRect.x - expandX),
-            y: Math.max(0, detectedRect.y - expandY),
-            width: Math.min(vw - (detectedRect.x - expandX), detectedRect.width + expandX * 2),
-            height: Math.min(vh - (detectedRect.y - expandY), detectedRect.height + expandY * 2.5),
-          };
-        }
-      } catch {
-        // Fall back to guide crop if detection fails
-      }
+      // Expand crop to ensure bottom text (name and number) aren't cut off
+      const { width: vw, height: vh } = { width: video.videoWidth, height: video.videoHeight };
+      const expandX = crop.width * 0.04;
+      const expandY = crop.height * 0.06;
+      crop = {
+        x: Math.max(0, crop.x - expandX),
+        y: Math.max(0, crop.y - expandY * 0.5), // expand more at bottom
+        width: Math.min(vw - Math.max(0, crop.x - expandX), crop.width + expandX * 2),
+        height: Math.min(vh - Math.max(0, crop.y - expandY * 0.5), crop.height + expandY * 1.5),
+      };
       
       // Keep the camera's native pixels (capped) so the bottom number band is
       // not softened before OCR; scanCanvas upscales the band itself.
